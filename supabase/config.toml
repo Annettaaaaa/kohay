@@ -1,1 +1,7 @@
 project_id = "gjrzthujrozovrlwhbjl"
+
+[functions.extract-location]
+verify_jwt = false
+
+[functions.trip-planner]
+verify_jwt = false
