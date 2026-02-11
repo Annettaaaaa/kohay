@@ -1,7 +1,7 @@
 import Navbar from "@/components/landing/Navbar";
 import HeroSection from "@/components/landing/HeroSection";
 import HowItWorksSection from "@/components/landing/HowItWorksSection";
-import MapPreviewSection from "@/components/landing/MapPreviewSection";
+import InteractiveMap from "@/components/landing/InteractiveMap";
 import FeaturesGrid from "@/components/landing/FeaturesGrid";
 import CTASection from "@/components/landing/CTASection";
 import Footer from "@/components/landing/Footer";
@@ -12,7 +12,7 @@ const Index = () => {
       <Navbar />
       <HeroSection />
       <HowItWorksSection />
-      <MapPreviewSection />
+      <InteractiveMap />
       <FeaturesGrid />
       <CTASection />
       <Footer />
