@@ -16,8 +16,8 @@ const HeroSection = () => {
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, ease: "easeOut" }}
-            className="space-y-8"
-          >
+            className="space-y-8">
+
             <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-4 py-2 text-sm font-medium text-primary">
               <Sparkles className="h-4 w-4" />
               Your saved reels, mapped & planned
@@ -49,14 +49,14 @@ const HeroSection = () => {
             {/* Social proof */}
             <div className="flex items-center gap-4 pt-4">
               <div className="flex -space-x-3">
-                {[1, 2, 3, 4].map((i) => (
-                  <div
-                    key={i}
-                    className="h-10 w-10 rounded-full border-2 border-background bg-secondary flex items-center justify-center text-xs font-bold text-muted-foreground"
-                  >
+                {[1, 2, 3, 4].map((i) =>
+                <div
+                  key={i}
+                  className="h-10 w-10 rounded-full border-2 border-background bg-secondary flex items-center justify-center text-xs font-bold text-muted-foreground">
+
                     {String.fromCharCode(64 + i)}
                   </div>
-                ))}
+                )}
               </div>
               <p className="text-sm text-muted-foreground">
                 <span className="font-semibold text-foreground">2,400+</span> travelers already mapping
@@ -69,20 +69,20 @@ const HeroSection = () => {
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 1, delay: 0.3, ease: "easeOut" }}
-            className="relative hidden lg:block"
-          >
+            className="relative hidden lg:block">
+
             <div className="relative rounded-3xl overflow-hidden shadow-[var(--shadow-elevated)]">
-              <img
-                src={heroImage}
-                alt="A traveler using Kohay to plan trips from saved social media content"
-                className="w-full h-auto object-cover"
-              />
+              
+
+
+
+
               {/* Floating card */}
               <motion.div
                 animate={{ y: [-8, 8, -8] }}
                 transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-                className="absolute bottom-8 left-8 bg-background/90 backdrop-blur-md rounded-2xl p-4 shadow-[var(--shadow-card)]"
-              >
+                className="absolute bottom-8 left-8 bg-background/90 backdrop-blur-md rounded-2xl p-4 shadow-[var(--shadow-card)]">
+
                 <div className="flex items-center gap-3">
                   <div className="h-10 w-10 rounded-full bg-accent flex items-center justify-center">
                     <MapPin className="h-5 w-5 text-accent-foreground" />
@@ -97,8 +97,8 @@ const HeroSection = () => {
           </motion.div>
         </div>
       </div>
-    </section>
-  );
+    </section>);
+
 };
 
 export default HeroSection;
