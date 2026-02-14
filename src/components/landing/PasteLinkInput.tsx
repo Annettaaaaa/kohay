@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Link2, Loader2, MapPin, Sparkles, X, AlertCircle } from "lucide-react";
+import { Link2, Loader2, MapPin, Sparkles, X, AlertCircle, CheckCircle2, AlertTriangle, HelpCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { extractLocation } from "@/lib/api/ai";
 
 interface ExtractedPlace {
@@ -10,19 +10,29 @@ interface ExtractedPlace {
   lat: number;
   lng: number;
   description?: string;
+  confidence?: "high" | "medium" | "low";
+  source_caption?: string;
 }
+
+const confidenceConfig = {
+  high: { icon: CheckCircle2, label: "High confidence", className: "bg-accent/15 text-accent" },
+  medium: { icon: AlertTriangle, label: "Medium confidence", className: "bg-[hsl(var(--warm-gold))]/15 text-[hsl(var(--warm-gold))]" },
+  low: { icon: HelpCircle, label: "Low confidence", className: "bg-destructive/15 text-destructive" },
+};
 
 const PasteLinkInput = () => {
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ExtractedPlace | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showCaption, setShowCaption] = useState(false);
 
   const handleExtract = async () => {
     if (!url.trim()) return;
     setLoading(true);
     setError(null);
     setResult(null);
+    setShowCaption(false);
 
     try {
       const data = await extractLocation(url.trim());
@@ -42,7 +52,12 @@ const PasteLinkInput = () => {
     setUrl("");
     setResult(null);
     setError(null);
+    setShowCaption(false);
   };
+
+  const confidence = result?.confidence || "low";
+  const conf = confidenceConfig[confidence];
+  const ConfIcon = conf.icon;
 
   return (
     <section className="py-16 bg-background" id="paste-link">
@@ -140,7 +155,7 @@ const PasteLinkInput = () => {
               className="mt-6 p-5 rounded-2xl bg-card border border-border shadow-[var(--shadow-card)]"
             >
               <div className="flex items-start justify-between gap-4">
-                <div className="space-y-2">
+                <div className="space-y-2 flex-1">
                   <div className="flex items-center gap-2">
                     <div className="h-10 w-10 rounded-xl bg-accent/15 flex items-center justify-center">
                       <MapPin className="h-5 w-5 text-accent" />
@@ -156,6 +171,11 @@ const PasteLinkInput = () => {
                     <span className="px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-semibold">
                       {result.category}
                     </span>
+                    {/* Confidence badge */}
+                    <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold ${conf.className}`}>
+                      <ConfIcon className="h-3 w-3" />
+                      {conf.label}
+                    </span>
                     {result.lat && result.lng && (
                       <span className="px-3 py-1 rounded-full bg-muted text-muted-foreground text-xs font-medium">
                         📍 {result.lat.toFixed(4)}, {result.lng.toFixed(4)}
@@ -164,6 +184,29 @@ const PasteLinkInput = () => {
                   </div>
                   {result.description && (
                     <p className="text-sm text-muted-foreground mt-2">{result.description}</p>
+                  )}
+                  {/* Source caption toggle */}
+                  {result.source_caption && (
+                    <div className="mt-2">
+                      <button
+                        onClick={() => setShowCaption(!showCaption)}
+                        className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        {showCaption ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                        {showCaption ? "Hide source text" : "Show source text"}
+                      </button>
+                      {showCaption && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: "auto" }}
+                          className="mt-2 p-3 rounded-xl bg-muted/50 border border-border/50"
+                        >
+                          <p className="text-xs text-muted-foreground whitespace-pre-wrap leading-relaxed">
+                            {result.source_caption}
+                          </p>
+                        </motion.div>
+                      )}
+                    </div>
                   )}
                 </div>
                 <button
