@@ -28,6 +28,8 @@ const PasteLinkInput = () => {
   const [result, setResult] = useState<ExtractedPlace | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showCaption, setShowCaption] = useState(false);
+  const { user } = useAuth();
+  const navigate = useNavigate();
 
   const handleExtract = async () => {
     if (!url.trim()) return;
