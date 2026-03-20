@@ -1,81 +1,52 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, ExternalLink, MapPin } from "lucide-react";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
+import { X, ExternalLink, MapPin, Layers, Satellite } from "lucide-react";
+import Map, {
+  Marker,
+  Popup,
+  NavigationControl,
+  type MapRef,
+} from "react-map-gl/mapbox";
+import type { LngLatBoundsLike } from "mapbox-gl";
+import "mapbox-gl/dist/mapbox-gl.css";
 import { getSavedPlaces, SavedPlace } from "@/lib/api/places";
 
-// Fix default marker icons broken by Webpack/Vite asset pipeline
-delete (L.Icon.Default.prototype as any)._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-});
+const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined;
 
-type PlaceCategory = "gym" | "food" | "library" | "museum" | "cafe" | "park" | "shopping" | "nightlife" | "hotel" | "beach" | "other";
-
-const categoryConfig: Record<string, { emoji: string; label: string; color: string; bg: string }> = {
-  gym:       { emoji: "💪", label: "Gym & Fitness",    color: "bg-pink-100 border-pink-300",     bg: "#fce7f3" },
-  food:      { emoji: "🍽️", label: "Food & Drinks",    color: "bg-orange-100 border-orange-300", bg: "#fed7aa" },
-  cafe:      { emoji: "☕", label: "Café",             color: "bg-amber-100 border-amber-300",   bg: "#fde68a" },
-  library:   { emoji: "📚", label: "Library & Study",  color: "bg-amber-100 border-amber-300",   bg: "#fde68a" },
-  museum:    { emoji: "🎨", label: "Museum & Art",     color: "bg-violet-100 border-violet-300", bg: "#ede9fe" },
-  park:      { emoji: "🌿", label: "Park & Nature",    color: "bg-green-100 border-green-300",   bg: "#d1fae5" },
-  shopping:  { emoji: "🛍️", label: "Shopping",         color: "bg-blue-100 border-blue-300",     bg: "#dbeafe" },
-  nightlife: { emoji: "🎵", label: "Nightlife",        color: "bg-purple-100 border-purple-300", bg: "#f3e8ff" },
-  hotel:     { emoji: "🏨", label: "Hotel & Stay",     color: "bg-sky-100 border-sky-300",       bg: "#e0f2fe" },
-  beach:     { emoji: "🏖️", label: "Beach",            color: "bg-cyan-100 border-cyan-300",     bg: "#cffafe" },
-  other:     { emoji: "📍", label: "Other",            color: "bg-gray-100 border-gray-300",     bg: "#f3f4f6" },
+type StyleId = "standard" | "satellite";
+const STYLES: Record<StyleId, string> = {
+  standard:  "mapbox://styles/mapbox/standard",
+  satellite: "mapbox://styles/mapbox/satellite-streets-v12",
 };
 
-function makePinIcon(emoji: string) {
-  return L.divIcon({
-    className: "",
-    html: `
-      <div style="display:flex;flex-direction:column;align-items:center;cursor:pointer">
-        <div style="
-          width:44px;height:44px;border-radius:50%;
-          border:3px solid white;
-          box-shadow:0 4px 12px rgba(0,0,0,0.25);
-          display:flex;align-items:center;justify-content:center;
-          font-size:22px;background:white;
-          transition:transform 0.15s;
-        ">${emoji}</div>
-        <div style="width:2px;height:10px;background:rgba(0,0,0,0.25);border-radius:1px;margin-top:1px"></div>
-        <div style="width:6px;height:6px;border-radius:50%;background:rgba(0,0,0,0.15)"></div>
-      </div>
-    `,
-    iconSize: [44, 60],
-    iconAnchor: [22, 60],
-    popupAnchor: [0, -60],
-  });
-}
-
-// Fly to bounds when places change
-function FlyToBounds({ places }: { places: SavedPlace[] }) {
-  const map = useMap();
-  useEffect(() => {
-    const withCoords = places.filter((p) => p.latitude != null && p.longitude != null);
-    if (withCoords.length === 0) return;
-    if (withCoords.length === 1) {
-      map.flyTo([withCoords[0].latitude!, withCoords[0].longitude!], 13, { duration: 1.2 });
-    } else {
-      const bounds = L.latLngBounds(withCoords.map((p) => [p.latitude!, p.longitude!]));
-      map.flyToBounds(bounds, { padding: [60, 60], duration: 1.2 });
-    }
-  }, [places, map]);
-  return null;
-}
+const categoryConfig: Record<string, { emoji: string; label: string; color: string; bg: string }> = {
+  gym:       { emoji: "💪", label: "Gym & Fitness",   color: "bg-pink-100 border-pink-300",     bg: "#fce7f3" },
+  food:      { emoji: "🍽️", label: "Food & Drinks",   color: "bg-orange-100 border-orange-300", bg: "#fed7aa" },
+  cafe:      { emoji: "☕", label: "Café",            color: "bg-amber-100 border-amber-300",   bg: "#fde68a" },
+  library:   { emoji: "📚", label: "Library & Study", color: "bg-amber-100 border-amber-300",   bg: "#fde68a" },
+  museum:    { emoji: "🎨", label: "Museum & Art",    color: "bg-violet-100 border-violet-300", bg: "#ede9fe" },
+  park:      { emoji: "🌿", label: "Park & Nature",   color: "bg-green-100 border-green-300",   bg: "#d1fae5" },
+  shopping:  { emoji: "🛍️", label: "Shopping",        color: "bg-blue-100 border-blue-300",     bg: "#dbeafe" },
+  nightlife: { emoji: "🎵", label: "Nightlife",       color: "bg-purple-100 border-purple-300", bg: "#f3e8ff" },
+  hotel:     { emoji: "🏨", label: "Hotel & Stay",    color: "bg-sky-100 border-sky-300",       bg: "#e0f2fe" },
+  beach:     { emoji: "🏖️", label: "Beach",           color: "bg-cyan-100 border-cyan-300",     bg: "#cffafe" },
+  other:     { emoji: "📍", label: "Other",           color: "bg-gray-100 border-gray-300",     bg: "#f3f4f6" },
+};
 
 const SHOW_CATEGORIES = ["all", "gym", "food", "cafe", "library", "museum", "park", "shopping", "nightlife", "hotel", "beach", "other"];
 
 const InteractiveMap = () => {
-  const [places, setPlaces] = useState<SavedPlace[]>([]);
+  const mapRef = useRef<MapRef>(null);
+  const [places, setPlaces]             = useState<SavedPlace[]>([]);
   const [selectedPlace, setSelectedPlace] = useState<SavedPlace | null>(null);
-  const [activeFilter, setActiveFilter] = useState<string>("all");
-  const [loading, setLoading] = useState(true);
+  const [activeFilter, setActiveFilter] = useState("all");
+  const [loading, setLoading]           = useState(true);
+  const [mapStyle, setMapStyle]         = useState<StyleId>("standard");
+  const [popupPlace, setPopupPlace]     = useState<SavedPlace | null>(null);
+
+  const fetchPlaces = useCallback(() => {
+    getSavedPlaces().then(setPlaces).catch(() => setPlaces([]));
+  }, []);
 
   useEffect(() => {
     getSavedPlaces()
@@ -84,24 +55,54 @@ const InteractiveMap = () => {
       .finally(() => setLoading(false));
   }, []);
 
-  // Re-fetch when a new place is saved (custom event)
   useEffect(() => {
-    const handler = () => {
-      getSavedPlaces().then(setPlaces).catch(() => {});
-    };
-    window.addEventListener("kohay:places-updated", handler);
-    return () => window.removeEventListener("kohay:places-updated", handler);
-  }, []);
+    window.addEventListener("kohay:places-updated", fetchPlaces);
+    return () => window.removeEventListener("kohay:places-updated", fetchPlaces);
+  }, [fetchPlaces]);
 
   const filteredPlaces = activeFilter === "all"
     ? places
     : places.filter((p) => p.category === activeFilter);
 
-  const placeCategories = [...new Set(places.map((p) => p.category))];
+  const withCoords = filteredPlaces.filter((p) => p.latitude != null && p.longitude != null);
 
-  const usedCategories = SHOW_CATEGORIES.filter(
-    (c) => c === "all" || placeCategories.includes(c)
-  );
+  // Fly to fit all visible places when list changes
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || withCoords.length === 0) return;
+
+    if (withCoords.length === 1) {
+      map.flyTo({ center: [withCoords[0].longitude!, withCoords[0].latitude!], zoom: 11, duration: 1400, essential: true });
+    } else {
+      const lngs = withCoords.map((p) => p.longitude!);
+      const lats = withCoords.map((p) => p.latitude!);
+      const bounds: LngLatBoundsLike = [
+        [Math.min(...lngs), Math.min(...lats)],
+        [Math.max(...lngs), Math.max(...lats)],
+      ];
+      map.fitBounds(bounds, { padding: 80, duration: 1400, maxZoom: 12 });
+    }
+  }, [filteredPlaces]);
+
+  const placeCategories = [...new Set(places.map((p) => p.category))];
+  const usedCategories  = SHOW_CATEGORIES.filter((c) => c === "all" || placeCategories.includes(c));
+
+  if (!MAPBOX_TOKEN || MAPBOX_TOKEN.startsWith("pk.YOUR")) {
+    return (
+      <section className="py-24 bg-background" id="map">
+        <div className="container mx-auto px-6 text-center">
+          <p className="text-muted-foreground text-sm">
+            Add <code className="bg-muted px-1 rounded">VITE_MAPBOX_TOKEN</code> to your{" "}
+            <code className="bg-muted px-1 rounded">.env</code> file to enable the map.{" "}
+            Get a free token at{" "}
+            <a href="https://account.mapbox.com/access-tokens/" target="_blank" rel="noopener noreferrer" className="text-primary underline">
+              mapbox.com
+            </a>.
+          </p>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="py-24 bg-background" id="map">
@@ -120,7 +121,7 @@ const InteractiveMap = () => {
           </p>
         </motion.div>
 
-        {/* Category filters — only show categories that exist in saved places */}
+        {/* Category filters */}
         {usedCategories.length > 1 && (
           <div className="flex flex-wrap justify-center gap-3 mb-8">
             {usedCategories.map((key) => {
@@ -145,13 +146,13 @@ const InteractiveMap = () => {
           </div>
         )}
 
-        {/* Map container */}
+        {/* Map */}
         <motion.div
           initial={{ opacity: 0, scale: 0.98 }}
           whileInView={{ opacity: 1, scale: 1 }}
           viewport={{ once: true }}
           className="relative rounded-3xl overflow-hidden shadow-[var(--shadow-elevated)] border border-border"
-          style={{ height: "520px" }}
+          style={{ height: 540 }}
         >
           {loading ? (
             <div className="flex items-center justify-center h-full bg-muted/30">
@@ -161,45 +162,97 @@ const InteractiveMap = () => {
               </div>
             </div>
           ) : (
-            <MapContainer
-              center={[20, 10]}
-              zoom={2}
-              minZoom={2}
-              maxZoom={18}
-              style={{ height: "100%", width: "100%" }}
-              zoomControl={true}
-              scrollWheelZoom={true}
-              worldCopyJump={true}
+            <Map
+              ref={mapRef}
+              mapboxAccessToken={MAPBOX_TOKEN}
+              mapStyle={STYLES[mapStyle]}
+              initialViewState={{ longitude: 10, latitude: 20, zoom: 1.8 }}
+              projection={{ name: "globe" }}
+              style={{ width: "100%", height: "100%" }}
+              onClick={() => { setPopupPlace(null); setSelectedPlace(null); }}
             >
-              {/* Carto Voyager tiles — clean, Apple Maps-like aesthetic */}
-              <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-                url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-                subdomains="abcd"
-                maxZoom={20}
-              />
+              <NavigationControl position="top-left" showCompass={false} />
 
-              {filteredPlaces
-                .filter((p) => p.latitude != null && p.longitude != null)
-                .map((place) => {
-                  const cat = categoryConfig[place.category] || categoryConfig.other;
-                  return (
-                    <Marker
-                      key={place.id}
-                      position={[place.latitude!, place.longitude!]}
-                      icon={makePinIcon(cat.emoji)}
-                      eventHandlers={{ click: () => setSelectedPlace(place) }}
-                    />
-                  );
-                })}
+              {withCoords.map((place) => {
+                const cat = categoryConfig[place.category] || categoryConfig.other;
+                return (
+                  <Marker
+                    key={place.id}
+                    longitude={place.longitude!}
+                    latitude={place.latitude!}
+                    anchor="bottom"
+                    onClick={(e) => {
+                      e.originalEvent.stopPropagation();
+                      setPopupPlace(place);
+                      setSelectedPlace(place);
+                    }}
+                  >
+                    <div
+                      className="flex flex-col items-center cursor-pointer group"
+                      style={{ filter: "drop-shadow(0 4px 8px rgba(0,0,0,0.3))" }}
+                    >
+                      <div
+                        className="w-11 h-11 rounded-full flex items-center justify-center text-[22px] border-[3px] border-white group-hover:scale-110 transition-transform"
+                        style={{ background: "white", boxShadow: "0 2px 8px rgba(0,0,0,0.2)" }}
+                      >
+                        {cat.emoji}
+                      </div>
+                      <div className="w-0.5 h-2.5 bg-white/70 rounded" />
+                      <div className="w-1.5 h-1.5 rounded-full bg-white/50" />
+                    </div>
+                  </Marker>
+                );
+              })}
 
-              <FlyToBounds places={filteredPlaces} />
-            </MapContainer>
+              {popupPlace && popupPlace.latitude && popupPlace.longitude && (
+                <Popup
+                  longitude={popupPlace.longitude}
+                  latitude={popupPlace.latitude}
+                  anchor="bottom"
+                  offset={64}
+                  closeButton={false}
+                  closeOnClick={false}
+                  onClose={() => setPopupPlace(null)}
+                  className="mapbox-popup-clean"
+                >
+                  <div className="px-3 py-2 min-w-[160px] max-w-[240px]">
+                    <p className="font-bold text-foreground text-sm leading-tight">{popupPlace.place_name}</p>
+                    {popupPlace.address && (
+                      <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{popupPlace.address}</p>
+                    )}
+                  </div>
+                </Popup>
+              )}
+            </Map>
           )}
 
-          {/* Empty state overlay */}
+          {/* Style toggle — top right */}
+          {!loading && (
+            <div className="absolute top-3 right-3 z-10 flex gap-1.5 bg-background/80 backdrop-blur-md rounded-xl p-1 border border-border shadow-sm">
+              <button
+                onClick={() => setMapStyle("standard")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  mapStyle === "standard" ? "bg-foreground text-background" : "text-foreground hover:bg-muted"
+                }`}
+              >
+                <Layers className="h-3.5 w-3.5" />
+                Map
+              </button>
+              <button
+                onClick={() => setMapStyle("satellite")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  mapStyle === "satellite" ? "bg-foreground text-background" : "text-foreground hover:bg-muted"
+                }`}
+              >
+                <Satellite className="h-3.5 w-3.5" />
+                Satellite
+              </button>
+            </div>
+          )}
+
+          {/* Empty state */}
           {!loading && places.length === 0 && (
-            <div className="absolute inset-0 flex items-end justify-center pb-12 pointer-events-none z-[1000]">
+            <div className="absolute inset-0 flex items-end justify-center pb-12 pointer-events-none z-10">
               <div className="bg-background/90 backdrop-blur-md rounded-2xl px-6 py-4 shadow-lg border border-border text-center max-w-xs">
                 <p className="text-sm font-semibold text-foreground mb-1">No places saved yet</p>
                 <p className="text-xs text-muted-foreground">
@@ -210,7 +263,7 @@ const InteractiveMap = () => {
           )}
         </motion.div>
 
-        {/* Selected place card — shown below the map */}
+        {/* Selected place detail card */}
         <AnimatePresence>
           {selectedPlace && (
             <motion.div
@@ -243,11 +296,7 @@ const InteractiveMap = () => {
                       <p className="text-sm text-muted-foreground mt-0.5">{selectedPlace.address}</p>
                     )}
                     <div className="flex flex-wrap gap-2 mt-2">
-                      <span
-                        className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold border ${
-                          categoryConfig[selectedPlace.category]?.color || "bg-gray-100 border-gray-300"
-                        }`}
-                      >
+                      <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold border ${categoryConfig[selectedPlace.category]?.color || "bg-gray-100 border-gray-300"}`}>
                         {categoryConfig[selectedPlace.category]?.emoji} {categoryConfig[selectedPlace.category]?.label || selectedPlace.category}
                       </span>
                       {selectedPlace.platform && (
@@ -257,14 +306,11 @@ const InteractiveMap = () => {
                       )}
                     </div>
                     {selectedPlace.description && (
-                      <p className="text-sm text-muted-foreground mt-2 leading-relaxed">
-                        {selectedPlace.description}
-                      </p>
+                      <p className="text-sm text-muted-foreground mt-2 leading-relaxed">{selectedPlace.description}</p>
                     )}
                     {selectedPlace.source_username && (
                       <p className="text-xs text-muted-foreground/70 mt-2">
-                        Saved from{" "}
-                        <span className="font-medium text-primary">@{selectedPlace.source_username}</span>
+                        Saved from <span className="font-medium text-primary">@{selectedPlace.source_username}</span>
                       </p>
                     )}
                   </div>
@@ -273,13 +319,13 @@ const InteractiveMap = () => {
                 {selectedPlace.latitude && selectedPlace.longitude && (
                   <div className="mt-4 pt-4 border-t border-border">
                     <a
-                      href={`https://maps.google.com/?q=${selectedPlace.latitude},${selectedPlace.longitude}`}
+                      href={`https://maps.apple.com/?ll=${selectedPlace.latitude},${selectedPlace.longitude}&q=${encodeURIComponent(selectedPlace.place_name)}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
                     >
                       <ExternalLink className="h-4 w-4" />
-                      Open in Google Maps
+                      Open in Apple Maps
                     </a>
                   </div>
                 )}
