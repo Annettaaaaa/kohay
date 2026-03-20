@@ -33,6 +33,10 @@ const PasteLinkInput = () => {
 
   const handleExtract = async () => {
     if (!url.trim()) return;
+    if (!user) {
+      navigate("/auth");
+      return;
+    }
     setLoading(true);
     setError(null);
     setResult(null);
