@@ -30,11 +30,25 @@ export interface PlaceInsert {
   platform?: string;
 }
 
+const SCHEMA_CACHE_ERROR = "schema cache";
+
+/** Calls the setup-db edge function to create the places table if missing. */
+async function ensurePlacesTable(): Promise<void> {
+  const { error } = await supabase.functions.invoke("setup-db");
+  if (error) console.warn("setup-db:", error.message);
+}
+
 export async function savePlaces(places: PlaceInsert[]): Promise<SavedPlace[]> {
-  const { data, error } = await supabase
-    .from("places" as any)
-    .insert(places)
-    .select();
+  const attempt = async () =>
+    supabase.from("places").insert(places).select();
+
+  let { data, error } = await attempt();
+
+  // If the table doesn't exist yet, create it then retry once
+  if (error?.message?.toLowerCase().includes(SCHEMA_CACHE_ERROR)) {
+    await ensurePlacesTable();
+    ({ data, error } = await attempt());
+  }
 
   if (error) throw new Error(error.message);
   return (data as SavedPlace[]) || [];
@@ -42,10 +56,14 @@ export async function savePlaces(places: PlaceInsert[]): Promise<SavedPlace[]> {
 
 export async function getSavedPlaces(): Promise<SavedPlace[]> {
   const { data, error } = await supabase
-    .from("places" as any)
+    .from("places")
     .select("*")
     .order("created_at", { ascending: false });
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    // Table doesn't exist yet — return empty list gracefully
+    if (error.message?.toLowerCase().includes(SCHEMA_CACHE_ERROR)) return [];
+    throw new Error(error.message);
+  }
   return (data as SavedPlace[]) || [];
 }
