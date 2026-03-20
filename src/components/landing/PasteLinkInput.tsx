@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Link2, Loader2, MapPin, Sparkles, X, AlertCircle,
@@ -6,6 +7,7 @@ import {
 } from "lucide-react";
 import { extractLocations, ExtractedPlace } from "@/lib/api/ai";
 import { savePlaces } from "@/lib/api/places";
+import { useAuth } from "@/hooks/useAuth";
 
 const confidenceConfig = {
   high:   { icon: CheckCircle2, label: "High confidence",   className: "bg-accent/15 text-accent" },
@@ -25,9 +27,15 @@ const PasteLinkInput = () => {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const { user } = useAuth();
+  const navigate = useNavigate();
 
   const handleExtract = async () => {
     if (!url.trim()) return;
+    if (!user) {
+      navigate("/auth");
+      return;
+    }
     setLoading(true);
     setError(null);
     setPlaces([]);
@@ -67,7 +75,6 @@ const PasteLinkInput = () => {
         }))
       );
       setSaved(true);
-      // Notify the map to refresh
       window.dispatchEvent(new Event("kohay:places-updated"));
     } catch (err: any) {
       setError(err.message || "Failed to save places");
