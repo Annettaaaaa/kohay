@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -6,62 +7,78 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+// --- Auth helper ---
+async function authenticateRequest(req: Request): Promise<{ userId: string } | Response> {
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader?.startsWith("Bearer ")) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  const supabaseClient = createClient(
+    Deno.env.get("SUPABASE_URL") ?? "",
+    Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+    { global: { headers: { Authorization: authHeader } } }
+  );
+
+  const token = authHeader.replace("Bearer ", "");
+  const { data, error } = await supabaseClient.auth.getUser(token);
+  if (error || !data?.user) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  return { userId: data.user.id };
+}
+
 // Strategy 1: TikTok oEmbed (free, no auth needed)
 async function fetchTikTokOembed(url: string): Promise<string | null> {
   try {
     const oembedUrl = `https://www.tiktok.com/oembed?url=${encodeURIComponent(url)}`;
     const resp = await fetch(oembedUrl);
-    if (!resp.ok) {
-      console.log("TikTok oEmbed failed:", resp.status);
-      return null;
-    }
+    if (!resp.ok) return null;
     const data = await resp.json();
     const parts: string[] = [];
     if (data.title) parts.push(`Caption: ${data.title}`);
     if (data.author_name) parts.push(`Author: ${data.author_name}`);
     if (data.author_url) parts.push(`Profile: ${data.author_url}`);
     const text = parts.join("\n");
-    console.log("TikTok oEmbed success, content length:", text.length);
     return text || null;
-  } catch (e) {
-    console.error("TikTok oEmbed error:", e);
+  } catch {
     return null;
   }
 }
 
-// Strategy 2: Instagram oEmbed (requires app token, try without)
+// Strategy 2: Instagram oEmbed
 async function fetchInstagramOembed(url: string): Promise<string | null> {
   try {
-    // Try the public endpoint (may be rate limited)
     const oembedUrl = `https://www.instagram.com/api/v1/oembed/?url=${encodeURIComponent(url)}`;
     const resp = await fetch(oembedUrl, {
       headers: { "User-Agent": "Mozilla/5.0 (compatible; Kohay/1.0)" },
     });
-    if (!resp.ok) {
-      console.log("Instagram oEmbed failed:", resp.status);
-      return null;
-    }
+    if (!resp.ok) return null;
     const data = await resp.json();
     const parts: string[] = [];
     if (data.title) parts.push(`Caption: ${data.title}`);
     if (data.author_name) parts.push(`Author: ${data.author_name}`);
     if (data.author_url) parts.push(`Profile: ${data.author_url}`);
     const text = parts.join("\n");
-    console.log("Instagram oEmbed success, content length:", text.length);
     return text || null;
-  } catch (e) {
-    console.error("Instagram oEmbed error:", e);
+  } catch {
     return null;
   }
 }
 
-// Strategy 3: Firecrawl (for non-TikTok/IG URLs)
+// Strategy 3: Firecrawl
 async function scrapeWithFirecrawl(url: string): Promise<string | null> {
   const apiKey = Deno.env.get("FIRECRAWL_API_KEY");
   if (!apiKey) return null;
 
   try {
-    console.log("Scraping with Firecrawl:", url);
     const response = await fetch("https://api.firecrawl.dev/v1/scrape", {
       method: "POST",
       headers: {
@@ -72,16 +89,10 @@ async function scrapeWithFirecrawl(url: string): Promise<string | null> {
     });
 
     const data = await response.json();
-    if (!response.ok) {
-      console.error("Firecrawl error:", response.status);
-      return null;
-    }
+    if (!response.ok) return null;
 
-    const markdown = data?.data?.markdown || data?.markdown || null;
-    console.log("Firecrawl success, content length:", markdown?.length || 0);
-    return markdown;
-  } catch (e) {
-    console.error("Firecrawl error:", e);
+    return data?.data?.markdown || data?.markdown || null;
+  } catch {
     return null;
   }
 }
@@ -95,7 +106,6 @@ function detectPlatform(url: string): "tiktok" | "instagram" | "youtube" | "othe
 
 async function getPageContent(url: string): Promise<{ content: string | null; platform: string }> {
   const platform = detectPlatform(url);
-
   let content: string | null = null;
 
   if (platform === "tiktok") {
@@ -104,7 +114,6 @@ async function getPageContent(url: string): Promise<{ content: string | null; pl
     content = await fetchInstagramOembed(url);
   }
 
-  // Fallback to Firecrawl for other platforms or if oEmbed failed
   if (!content) {
     content = await scrapeWithFirecrawl(url);
   }
@@ -116,6 +125,10 @@ serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
+
+  // Authenticate
+  const authResult = await authenticateRequest(req);
+  if (authResult instanceof Response) return authResult;
 
   try {
     const { url } = await req.json();
@@ -129,11 +142,9 @@ serve(async (req) => {
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
 
-    // Step 1: Get page content via oEmbed or Firecrawl
     const { content: scrapedContent } = await getPageContent(url);
     const hasContent = !!scrapedContent && scrapedContent.length > 20;
 
-    // Step 2: Build AI prompt
     const systemPrompt = hasContent
       ? `You are a location extraction assistant for a travel app called Kohay.
 You are given a social media URL AND the post's caption/content.
@@ -154,15 +165,9 @@ You only have the URL (no page content was available). Try to extract any locati
 Set confidence to "low" since you cannot see the actual post content.`;
 
     const userMessage = hasContent
-      ? `Extract location info from this social media post.
-
-URL: ${url}
-
-Post content:
-${scrapedContent!.slice(0, 8000)}`
+      ? `Extract location info from this social media post.\n\nURL: ${url}\n\nPost content:\n${scrapedContent!.slice(0, 8000)}`
       : `Extract location info from this URL (no page content available): ${url}`;
 
-    // Step 3: Call AI
     const response = await fetch(
       "https://ai.gateway.lovable.dev/v1/chat/completions",
       {
@@ -190,27 +195,15 @@ ${scrapedContent!.slice(0, 8000)}`
                     category: {
                       type: "string",
                       enum: ["gym", "food", "library", "museum", "cafe", "park", "shopping", "nightlife", "hotel", "beach", "other"],
-                      description: "Category of the place",
                     },
                     address: { type: "string", description: "Full address or city/country" },
-                    latitude: { type: "number", description: "Approximate latitude" },
-                    longitude: { type: "number", description: "Approximate longitude" },
-                    description: { type: "string", description: "Brief description of the place (1-2 sentences)" },
-                    source_username: { type: "string", description: "Username from the social media post" },
-                    platform: {
-                      type: "string",
-                      enum: ["tiktok", "instagram", "youtube", "other"],
-                      description: "Social media platform",
-                    },
-                    confidence: {
-                      type: "string",
-                      enum: ["high", "medium", "low"],
-                      description: "high = explicit location found, medium = inferred from context, low = guessing",
-                    },
-                    source_caption: {
-                      type: "string",
-                      description: "The relevant caption/text from the post mentioning the location",
-                    },
+                    latitude: { type: "number" },
+                    longitude: { type: "number" },
+                    description: { type: "string", description: "Brief description (1-2 sentences)" },
+                    source_username: { type: "string" },
+                    platform: { type: "string", enum: ["tiktok", "instagram", "youtube", "other"] },
+                    confidence: { type: "string", enum: ["high", "medium", "low"] },
+                    source_caption: { type: "string" },
                   },
                   required: ["place_name", "category", "address", "description", "platform", "confidence"],
                   additionalProperties: false,
@@ -224,22 +217,19 @@ ${scrapedContent!.slice(0, 8000)}`
     );
 
     if (!response.ok) {
-      if (response.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again later." }),
-          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      console.error("AI gateway error:", response.status);
+      if (response.status === 429 || response.status === 402) {
+        return new Response(
+          JSON.stringify({ error: "Service temporarily unavailable. Please try again later." }),
+          { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
       }
-      if (response.status === 402) {
-        return new Response(JSON.stringify({ error: "AI credits exhausted. Please add credits." }),
-          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      }
-      const text = await response.text();
-      console.error("AI gateway error:", response.status, text);
-      throw new Error("AI gateway error");
+      throw new Error("AI service error");
     }
 
     const data = await response.json();
     const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
-    if (!toolCall) throw new Error("AI did not return structured location data");
+    if (!toolCall) throw new Error("Failed to extract location data");
 
     const locationData = JSON.parse(toolCall.function.arguments);
 
@@ -247,15 +237,13 @@ ${scrapedContent!.slice(0, 8000)}`
       locationData.confidence = "low";
     }
 
-    console.log("Result:", JSON.stringify({ place: locationData.place_name, confidence: locationData.confidence, hadContent: hasContent }));
-
     return new Response(JSON.stringify({ success: true, data: locationData }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
     console.error("extract-location error:", e);
     return new Response(
-      JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }),
+      JSON.stringify({ error: "Failed to extract location. Please try again." }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
