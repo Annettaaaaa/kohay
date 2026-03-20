@@ -1,5 +1,16 @@
 import { supabase } from "@/integrations/supabase/client";
 
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) {
+    throw new Error("Please sign in to use this feature");
+  }
+  return {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${session.access_token}`,
+  };
+}
+
 export async function extractLocation(url: string) {
   const { data, error } = await supabase.functions.invoke("extract-location", {
     body: { url },
@@ -23,14 +34,13 @@ export async function streamTripPlanner({
   onDelta: (text: string) => void;
   onDone: () => void;
 }) {
+  const headers = await getAuthHeaders();
+
   const resp = await fetch(
     `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/trip-planner`,
     {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-      },
+      headers,
       body: JSON.stringify({ messages, savedPlaces }),
     }
   );

@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Link2, Loader2, MapPin, Sparkles, X, AlertCircle, CheckCircle2, AlertTriangle, HelpCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { extractLocation } from "@/lib/api/ai";
+import { useAuth } from "@/hooks/useAuth";
 
 interface ExtractedPlace {
   name: string;
@@ -26,9 +28,15 @@ const PasteLinkInput = () => {
   const [result, setResult] = useState<ExtractedPlace | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showCaption, setShowCaption] = useState(false);
+  const { user } = useAuth();
+  const navigate = useNavigate();
 
   const handleExtract = async () => {
     if (!url.trim()) return;
+    if (!user) {
+      navigate("/auth");
+      return;
+    }
     setLoading(true);
     setError(null);
     setResult(null);

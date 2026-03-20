@@ -1,8 +1,13 @@
 import { motion } from "framer-motion";
-import { MapPin } from "lucide-react";
+import { MapPin, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/hooks/useAuth";
+import { useNavigate } from "react-router-dom";
 
 const Navbar = () => {
+  const { user, signOut } = useAuth();
+  const navigate = useNavigate();
+
   return (
     <motion.nav
       initial={{ opacity: 0, y: -10 }}
@@ -30,9 +35,30 @@ const Navbar = () => {
           </a>
         </div>
 
-        <Button variant="hero" size="sm" className="rounded-full px-6">
-          Join Waitlist
-        </Button>
+        {user ? (
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-muted-foreground hidden sm:inline">
+              {user.email}
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => signOut()}
+              className="rounded-full"
+            >
+              <LogOut className="h-4 w-4" />
+            </Button>
+          </div>
+        ) : (
+          <Button
+            variant="hero"
+            size="sm"
+            className="rounded-full px-6"
+            onClick={() => navigate("/auth")}
+          >
+            Sign In
+          </Button>
+        )}
       </div>
     </motion.nav>
   );
