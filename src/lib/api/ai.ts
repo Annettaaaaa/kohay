@@ -1,5 +1,18 @@
 import { supabase } from "@/integrations/supabase/client";
 
+export interface ExtractedPlace {
+  place_name: string;
+  category: string;
+  address: string;
+  latitude?: number;
+  longitude?: number;
+  description?: string;
+  confidence: "high" | "medium" | "low";
+  source_caption?: string;
+  source_username?: string;
+  platform: string;
+}
+
 async function getAuthHeaders(): Promise<Record<string, string>> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session?.access_token) {
@@ -11,14 +24,17 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
   };
 }
 
-export async function extractLocation(url: string) {
+export async function extractLocations(url: string): Promise<ExtractedPlace[]> {
   const { data, error } = await supabase.functions.invoke("extract-location", {
     body: { url },
   });
 
   if (error) throw new Error(error.message);
   if (data?.error) throw new Error(data.error);
-  return data.data;
+
+  // Normalise: function returns { success, places: [...] }
+  const places: ExtractedPlace[] = data?.places ?? (data?.data ? [data.data] : []);
+  return places;
 }
 
 type Msg = { role: "user" | "assistant"; content: string };
