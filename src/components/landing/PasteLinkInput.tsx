@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Link2, Loader2, MapPin, Sparkles, X, AlertCircle, CheckCircle2, AlertTriangle, HelpCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { extractLocation } from "@/lib/api/ai";
+import { useAuth } from "@/hooks/useAuth";
 
 interface ExtractedPlace {
   name: string;
