@@ -1,58 +1,107 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Heart, ExternalLink } from "lucide-react";
-import mapBg from "@/assets/apple-map-bg.jpg";
-import gym1 from "@/assets/places/gym-1.jpg";
-import gym2 from "@/assets/places/gym-2.jpg";
-import food1 from "@/assets/places/food-1.jpg";
-import food2 from "@/assets/places/food-2.jpg";
-import library1 from "@/assets/places/library-1.jpg";
-import museum1 from "@/assets/places/museum-1.jpg";
+import { X, ExternalLink, MapPin } from "lucide-react";
+import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+import { getSavedPlaces, SavedPlace } from "@/lib/api/places";
 
-type PlaceCategory = "gym" | "food" | "library" | "museum";
+// Fix default marker icons broken by Webpack/Vite asset pipeline
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
+  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+});
 
-interface Place {
-  id: string;
-  name: string;
-  category: PlaceCategory;
-  x: number; // percentage position
-  y: number;
-  images: string[];
-  address: string;
-  savedFrom: string;
-}
+type PlaceCategory = "gym" | "food" | "library" | "museum" | "cafe" | "park" | "shopping" | "nightlife" | "hotel" | "beach" | "other";
 
-const categoryConfig: Record<PlaceCategory, {emoji: string;label: string;color: string;}> = {
-  gym: { emoji: "💪", label: "Gym & Fitness", color: "bg-pink-100 border-pink-300" },
-  food: { emoji: "🍽️", label: "Food & Drinks", color: "bg-orange-100 border-orange-300" },
-  library: { emoji: "📚", label: "Library & Study", color: "bg-amber-100 border-amber-300" },
-  museum: { emoji: "🎨", label: "Museum & Art", color: "bg-violet-100 border-violet-300" }
+const categoryConfig: Record<string, { emoji: string; label: string; color: string; bg: string }> = {
+  gym:       { emoji: "💪", label: "Gym & Fitness",    color: "bg-pink-100 border-pink-300",     bg: "#fce7f3" },
+  food:      { emoji: "🍽️", label: "Food & Drinks",    color: "bg-orange-100 border-orange-300", bg: "#fed7aa" },
+  cafe:      { emoji: "☕", label: "Café",             color: "bg-amber-100 border-amber-300",   bg: "#fde68a" },
+  library:   { emoji: "📚", label: "Library & Study",  color: "bg-amber-100 border-amber-300",   bg: "#fde68a" },
+  museum:    { emoji: "🎨", label: "Museum & Art",     color: "bg-violet-100 border-violet-300", bg: "#ede9fe" },
+  park:      { emoji: "🌿", label: "Park & Nature",    color: "bg-green-100 border-green-300",   bg: "#d1fae5" },
+  shopping:  { emoji: "🛍️", label: "Shopping",         color: "bg-blue-100 border-blue-300",     bg: "#dbeafe" },
+  nightlife: { emoji: "🎵", label: "Nightlife",        color: "bg-purple-100 border-purple-300", bg: "#f3e8ff" },
+  hotel:     { emoji: "🏨", label: "Hotel & Stay",     color: "bg-sky-100 border-sky-300",       bg: "#e0f2fe" },
+  beach:     { emoji: "🏖️", label: "Beach",            color: "bg-cyan-100 border-cyan-300",     bg: "#cffafe" },
+  other:     { emoji: "📍", label: "Other",            color: "bg-gray-100 border-gray-300",     bg: "#f3f4f6" },
 };
 
-const places: Place[] = [
-{ id: "1", name: "Glow Pilates Studio", category: "gym", x: 22, y: 35, images: [gym1, gym2], address: "12 Rue de Rivoli, Paris", savedFrom: "@pilatesgirl on TikTok" },
-{ id: "2", name: "Café Fleur", category: "food", x: 45, y: 25, images: [food1, food2], address: "8 Bd Saint-Germain, Paris", savedFrom: "@parisfoodies on IG" },
-{ id: "3", name: "The Cozy Chapter", category: "library", x: 65, y: 55, images: [library1], address: "23 Rue Mouffetard, Paris", savedFrom: "@bookishvibes on TikTok" },
-{ id: "4", name: "Musée de l'Art Moderne", category: "museum", x: 38, y: 60, images: [museum1], address: "11 Av. du Président Wilson", savedFrom: "@artwalks on IG" },
-{ id: "5", name: "Berry Bliss Bowl", category: "food", x: 75, y: 30, images: [food2, food1], address: "5 Rue des Rosiers, Paris", savedFrom: "@healthyeats on TikTok" },
-{ id: "6", name: "Sunset Yoga Loft", category: "gym", x: 55, y: 72, images: [gym2, gym1], address: "30 Rue Cler, Paris", savedFrom: "@yogaflow on IG" }];
+function makePinIcon(emoji: string) {
+  return L.divIcon({
+    className: "",
+    html: `
+      <div style="display:flex;flex-direction:column;align-items:center;cursor:pointer">
+        <div style="
+          width:44px;height:44px;border-radius:50%;
+          border:3px solid white;
+          box-shadow:0 4px 12px rgba(0,0,0,0.25);
+          display:flex;align-items:center;justify-content:center;
+          font-size:22px;background:white;
+          transition:transform 0.15s;
+        ">${emoji}</div>
+        <div style="width:2px;height:10px;background:rgba(0,0,0,0.25);border-radius:1px;margin-top:1px"></div>
+        <div style="width:6px;height:6px;border-radius:50%;background:rgba(0,0,0,0.15)"></div>
+      </div>
+    `,
+    iconSize: [44, 60],
+    iconAnchor: [22, 60],
+    popupAnchor: [0, -60],
+  });
+}
 
+// Fly to bounds when places change
+function FlyToBounds({ places }: { places: SavedPlace[] }) {
+  const map = useMap();
+  useEffect(() => {
+    const withCoords = places.filter((p) => p.latitude != null && p.longitude != null);
+    if (withCoords.length === 0) return;
+    if (withCoords.length === 1) {
+      map.flyTo([withCoords[0].latitude!, withCoords[0].longitude!], 13, { duration: 1.2 });
+    } else {
+      const bounds = L.latLngBounds(withCoords.map((p) => [p.latitude!, p.longitude!]));
+      map.flyToBounds(bounds, { padding: [60, 60], duration: 1.2 });
+    }
+  }, [places, map]);
+  return null;
+}
 
-const categories = Object.entries(categoryConfig);
+const SHOW_CATEGORIES = ["all", "gym", "food", "cafe", "library", "museum", "park", "shopping", "nightlife", "hotel", "beach", "other"];
 
 const InteractiveMap = () => {
-  const [selectedPlace, setSelectedPlace] = useState<Place | null>(null);
-  const [activeFilter, setActiveFilter] = useState<PlaceCategory | "all">("all");
-  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [places, setPlaces] = useState<SavedPlace[]>([]);
+  const [selectedPlace, setSelectedPlace] = useState<SavedPlace | null>(null);
+  const [activeFilter, setActiveFilter] = useState<string>("all");
+  const [loading, setLoading] = useState(true);
 
-  const filteredPlaces = activeFilter === "all" ?
-  places :
-  places.filter((p) => p.category === activeFilter);
+  useEffect(() => {
+    getSavedPlaces()
+      .then(setPlaces)
+      .catch(() => setPlaces([]))
+      .finally(() => setLoading(false));
+  }, []);
 
-  const handlePinClick = (place: Place) => {
-    setSelectedPlace(place);
-    setCurrentImageIndex(0);
-  };
+  // Re-fetch when a new place is saved (custom event)
+  useEffect(() => {
+    const handler = () => {
+      getSavedPlaces().then(setPlaces).catch(() => {});
+    };
+    window.addEventListener("kohay:places-updated", handler);
+    return () => window.removeEventListener("kohay:places-updated", handler);
+  }, []);
+
+  const filteredPlaces = activeFilter === "all"
+    ? places
+    : places.filter((p) => p.category === activeFilter);
+
+  const placeCategories = [...new Set(places.map((p) => p.category))];
+
+  const usedCategories = SHOW_CATEGORIES.filter(
+    (c) => c === "all" || placeCategories.includes(c)
+  );
 
   return (
     <section className="py-24 bg-background" id="map">
@@ -61,42 +110,40 @@ const InteractiveMap = () => {
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
-          className="text-center mb-10">
-
+          className="text-center mb-10"
+        >
           <h2 className="text-4xl md:text-5xl font-bold text-foreground mb-4 font-display">
             Your saved spots
           </h2>
           <p className="text-muted-foreground text-lg max-w-xl mx-auto">
-            Tap a pin to see the aesthetic pics & details from your saved reels.
+            Every place you extract from TikTok & Instagram — pinned to a real world map.
           </p>
         </motion.div>
 
-        {/* Category filters */}
-        <div className="flex flex-wrap justify-center gap-3 mb-8">
-          <button
-            onClick={() => setActiveFilter("all")}
-            className={`px-5 py-2.5 rounded-full text-sm font-semibold transition-all border-2 ${
-            activeFilter === "all" ?
-            "bg-foreground text-background border-foreground" :
-            "bg-card text-foreground border-border hover:border-foreground/30"}`
-            }>
-
-            🗺️ All
-          </button>
-          {categories.map(([key, config]) =>
-          <button
-            key={key}
-            onClick={() => setActiveFilter(key as PlaceCategory)}
-            className={`px-5 py-2.5 rounded-full text-sm font-semibold transition-all border-2 ${
-            activeFilter === key ?
-            "bg-foreground text-background border-foreground" :
-            `${config.color} text-foreground hover:scale-105`}`
-            }>
-
-              {config.emoji} {config.label}
-            </button>
-          )}
-        </div>
+        {/* Category filters — only show categories that exist in saved places */}
+        {usedCategories.length > 1 && (
+          <div className="flex flex-wrap justify-center gap-3 mb-8">
+            {usedCategories.map((key) => {
+              const config = key === "all" ? { emoji: "🗺️", label: "All" } : categoryConfig[key];
+              const isActive = activeFilter === key;
+              return (
+                <button
+                  key={key}
+                  onClick={() => setActiveFilter(key)}
+                  className={`px-5 py-2.5 rounded-full text-sm font-semibold transition-all border-2 ${
+                    isActive
+                      ? "bg-foreground text-background border-foreground"
+                      : key === "all"
+                        ? "bg-card text-foreground border-border hover:border-foreground/30"
+                        : `${categoryConfig[key]?.color || ""} text-foreground hover:scale-105`
+                  }`}
+                >
+                  {config.emoji} {config.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* Map container */}
         <motion.div
@@ -104,153 +151,145 @@ const InteractiveMap = () => {
           whileInView={{ opacity: 1, scale: 1 }}
           viewport={{ once: true }}
           className="relative rounded-3xl overflow-hidden shadow-[var(--shadow-elevated)] border border-border"
-          style={{ aspectRatio: "16/9" }}>
-
-          {/* Apple Maps style background */}
-          <img
-            src={mapBg}
-            alt="Map view"
-            className="absolute inset-0 w-full h-full object-cover" />
-
-
-          {/* Map overlay for slight warmth */}
-          <div className="absolute inset-0 bg-background/10" />
-
-          {/* Pins */}
-          <AnimatePresence>
-            {filteredPlaces.map((place) => {
-              const config = categoryConfig[place.category];
-              return (
-                <motion.button
-                  key={place.id}
-                  initial={{ scale: 0, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  exit={{ scale: 0, opacity: 0 }}
-                  transition={{ type: "spring", stiffness: 400, damping: 25 }}
-                  onClick={() => handlePinClick(place)}
-                  className="absolute z-10 group"
-                  style={{ left: `${place.x}%`, top: `${place.y}%`, transform: "translate(-50%, -100%)" }}>
-
-                  {/* Pin body */}
-                  <div className="relative flex flex-col items-center">
-                    {/* Tooltip on hover */}
-                    <div className="absolute -top-10 opacity-0 group-hover:opacity-100 transition-opacity bg-foreground text-background text-xs font-semibold px-3 py-1.5 rounded-lg whitespace-nowrap shadow-lg pointer-events-none">
-                      {place.name}
-                    </div>
-
-                    {/* Emoji bubble */}
-                    <div
-                      className={`h-12 w-12 rounded-full border-[3px] border-background shadow-lg flex items-center justify-center text-xl cursor-pointer
-                        hover:scale-110 transition-transform duration-200 ${config.color}`}>
-
-                      {config.emoji}
-                    </div>
-                    {/* Pin stem */}
-                    <div className="w-0.5 h-3 bg-foreground/30 rounded-full" />
-                    <div className="w-2 h-2 rounded-full bg-foreground/20" />
-                  </div>
-                </motion.button>);
-
-            })}
-          </AnimatePresence>
-
-          {/* Apple Maps style UI elements */}
-          <div className="absolute top-4 left-4 bg-background/80 backdrop-blur-md rounded-2xl px-4 py-2 shadow-[var(--shadow-soft)] flex items-center gap-2 text-[#eba8a8]">
-            <div className="h-2 w-2 rounded-full bg-accent animate-pulse-soft" />
-            <span className="text-xs font-semibold text-foreground">Paris, France</span>
-          </div>
-
-          <div className="absolute top-4 right-4 flex flex-col gap-2">
-            <div className="bg-background/80 backdrop-blur-md rounded-xl p-2 shadow-[var(--shadow-soft)]">
-              <span className="text-sm font-bold text-foreground leading-none block text-center">+</span>
+          style={{ height: "520px" }}
+        >
+          {loading ? (
+            <div className="flex items-center justify-center h-full bg-muted/30">
+              <div className="flex flex-col items-center gap-3 text-muted-foreground">
+                <MapPin className="h-8 w-8 animate-pulse" />
+                <p className="text-sm font-medium">Loading your map…</p>
+              </div>
             </div>
-            <div className="bg-background/80 backdrop-blur-md rounded-xl p-2 shadow-[var(--shadow-soft)]">
-              <span className="text-sm font-bold text-foreground leading-none block text-center">−</span>
-            </div>
-          </div>
+          ) : (
+            <MapContainer
+              center={[20, 10]}
+              zoom={2}
+              minZoom={2}
+              maxZoom={18}
+              style={{ height: "100%", width: "100%" }}
+              zoomControl={true}
+              scrollWheelZoom={true}
+              worldCopyJump={true}
+            >
+              {/* Carto Voyager tiles — clean, Apple Maps-like aesthetic */}
+              <TileLayer
+                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                subdomains="abcd"
+                maxZoom={20}
+              />
 
-          {/* Selected place popup */}
-          <AnimatePresence>
-            {selectedPlace &&
+              {filteredPlaces
+                .filter((p) => p.latitude != null && p.longitude != null)
+                .map((place) => {
+                  const cat = categoryConfig[place.category] || categoryConfig.other;
+                  return (
+                    <Marker
+                      key={place.id}
+                      position={[place.latitude!, place.longitude!]}
+                      icon={makePinIcon(cat.emoji)}
+                      eventHandlers={{ click: () => setSelectedPlace(place) }}
+                    />
+                  );
+                })}
+
+              <FlyToBounds places={filteredPlaces} />
+            </MapContainer>
+          )}
+
+          {/* Empty state overlay */}
+          {!loading && places.length === 0 && (
+            <div className="absolute inset-0 flex items-end justify-center pb-12 pointer-events-none z-[1000]">
+              <div className="bg-background/90 backdrop-blur-md rounded-2xl px-6 py-4 shadow-lg border border-border text-center max-w-xs">
+                <p className="text-sm font-semibold text-foreground mb-1">No places saved yet</p>
+                <p className="text-xs text-muted-foreground">
+                  Paste a TikTok or Instagram link above to extract and save places to your map.
+                </p>
+              </div>
+            </div>
+          )}
+        </motion.div>
+
+        {/* Selected place card — shown below the map */}
+        <AnimatePresence>
+          {selectedPlace && (
             <motion.div
-              initial={{ opacity: 0, y: 20, scale: 0.95 }}
+              initial={{ opacity: 0, y: 16, scale: 0.97 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 20, scale: 0.95 }}
+              exit={{ opacity: 0, y: 16, scale: 0.97 }}
               transition={{ type: "spring", stiffness: 400, damping: 30 }}
-              className="absolute bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-md z-20">
-
-                <div className="bg-background/95 backdrop-blur-xl rounded-3xl shadow-[var(--shadow-elevated)] overflow-hidden border border-border">
-                  {/* Close button */}
-                  <button
+              className="mt-4 relative bg-card border border-border rounded-3xl shadow-[var(--shadow-elevated)] overflow-hidden"
+            >
+              <div className="p-5">
+                <button
                   onClick={() => setSelectedPlace(null)}
-                  className="absolute top-3 right-3 z-30 h-8 w-8 rounded-full bg-foreground/10 backdrop-blur-sm flex items-center justify-center hover:bg-foreground/20 transition-colors">
+                  className="absolute top-4 right-4 h-8 w-8 rounded-full bg-muted flex items-center justify-center hover:bg-muted-foreground/20 transition-colors"
+                >
+                  <X className="h-4 w-4 text-muted-foreground" />
+                </button>
 
-                    <X className="h-4 w-4 text-foreground" />
-                  </button>
-
-                  {/* Image gallery */}
-                  <div className="relative h-48 overflow-hidden">
-                    <img
-                    src={selectedPlace.images[currentImageIndex]}
-                    alt={selectedPlace.name}
-                    className="w-full h-full object-cover" />
-
-                    {/* Image dots */}
-                    {selectedPlace.images.length > 1 &&
-                  <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5">
-                        {selectedPlace.images.map((_, i) =>
-                    <button
-                      key={i}
-                      onClick={() => setCurrentImageIndex(i)}
-                      className={`h-2 rounded-full transition-all ${
-                      i === currentImageIndex ?
-                      "w-6 bg-background" :
-                      "w-2 bg-background/50"}`
-                      } />
-
-                    )}
-                      </div>
-                  }
-                    {/* Category badge */}
-                    <div className="absolute top-3 left-3">
-                      <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold ${categoryConfig[selectedPlace.category].color} backdrop-blur-sm`}>
-                        {categoryConfig[selectedPlace.category].emoji}{" "}
-                        {categoryConfig[selectedPlace.category].label}
-                      </span>
-                    </div>
+                <div className="flex items-start gap-4 pr-10">
+                  <div
+                    className="h-14 w-14 rounded-2xl flex items-center justify-center text-2xl shrink-0 border-2"
+                    style={{ background: categoryConfig[selectedPlace.category]?.bg || "#f3f4f6" }}
+                  >
+                    {categoryConfig[selectedPlace.category]?.emoji || "📍"}
                   </div>
-
-                  {/* Info */}
-                  <div className="p-5 space-y-3">
-                    <div>
-                      <h3 className="text-lg font-bold text-foreground font-display">
-                        {selectedPlace.name}
-                      </h3>
-                      <p className="text-sm text-muted-foreground">{selectedPlace.address}</p>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-lg font-bold text-foreground font-display leading-tight">
+                      {selectedPlace.place_name}
+                    </h3>
+                    {selectedPlace.address && (
+                      <p className="text-sm text-muted-foreground mt-0.5">{selectedPlace.address}</p>
+                    )}
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      <span
+                        className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold border ${
+                          categoryConfig[selectedPlace.category]?.color || "bg-gray-100 border-gray-300"
+                        }`}
+                      >
+                        {categoryConfig[selectedPlace.category]?.emoji} {categoryConfig[selectedPlace.category]?.label || selectedPlace.category}
+                      </span>
+                      {selectedPlace.platform && (
+                        <span className="px-3 py-1 rounded-full bg-muted text-muted-foreground text-xs font-medium capitalize">
+                          {selectedPlace.platform}
+                        </span>
+                      )}
                     </div>
-
-                    <p className="text-xs text-muted-foreground/70">
-                      Saved from <span className="font-medium text-primary">{selectedPlace.savedFrom}</span>
-                    </p>
-
-                    <div className="flex gap-2 pt-1">
-                      <button className="flex-1 bg-primary text-primary-foreground rounded-xl py-2.5 text-sm font-semibold hover:bg-primary/90 transition-colors flex items-center justify-center gap-2">
-                        <ExternalLink className="h-4 w-4" />
-                        Open in Maps
-                      </button>
-                      <button className="h-10 w-10 rounded-xl border-2 border-border flex items-center justify-center hover:bg-card transition-colors">
-                        <Heart className="h-4 w-4 text-soft-coral" />
-                      </button>
-                    </div>
+                    {selectedPlace.description && (
+                      <p className="text-sm text-muted-foreground mt-2 leading-relaxed">
+                        {selectedPlace.description}
+                      </p>
+                    )}
+                    {selectedPlace.source_username && (
+                      <p className="text-xs text-muted-foreground/70 mt-2">
+                        Saved from{" "}
+                        <span className="font-medium text-primary">@{selectedPlace.source_username}</span>
+                      </p>
+                    )}
                   </div>
                 </div>
-              </motion.div>
-            }
-          </AnimatePresence>
-        </motion.div>
-      </div>
-    </section>);
 
+                {selectedPlace.latitude && selectedPlace.longitude && (
+                  <div className="mt-4 pt-4 border-t border-border">
+                    <a
+                      href={`https://maps.google.com/?q=${selectedPlace.latitude},${selectedPlace.longitude}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                      Open in Google Maps
+                    </a>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </section>
+  );
 };
 
 export default InteractiveMap;

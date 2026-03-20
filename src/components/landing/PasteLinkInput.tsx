@@ -1,42 +1,41 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Link2, Loader2, MapPin, Sparkles, X, AlertCircle, CheckCircle2, AlertTriangle, HelpCircle, ChevronDown, ChevronUp } from "lucide-react";
-import { extractLocation } from "@/lib/api/ai";
-
-interface ExtractedPlace {
-  name: string;
-  category: string;
-  address: string;
-  lat: number;
-  lng: number;
-  description?: string;
-  confidence?: "high" | "medium" | "low";
-  source_caption?: string;
-}
+import {
+  Link2, Loader2, MapPin, Sparkles, X, AlertCircle,
+  CheckCircle2, AlertTriangle, HelpCircle, Save, Check,
+} from "lucide-react";
+import { extractLocations, ExtractedPlace } from "@/lib/api/ai";
+import { savePlaces } from "@/lib/api/places";
 
 const confidenceConfig = {
-  high: { icon: CheckCircle2, label: "High confidence", className: "bg-accent/15 text-accent" },
+  high:   { icon: CheckCircle2, label: "High confidence",   className: "bg-accent/15 text-accent" },
   medium: { icon: AlertTriangle, label: "Medium confidence", className: "bg-[hsl(var(--warm-gold))]/15 text-[hsl(var(--warm-gold))]" },
-  low: { icon: HelpCircle, label: "Low confidence", className: "bg-destructive/15 text-destructive" },
+  low:    { icon: HelpCircle,    label: "Low confidence",    className: "bg-destructive/15 text-destructive" },
+};
+
+const categoryEmoji: Record<string, string> = {
+  gym: "💪", food: "🍽️", cafe: "☕", library: "📚", museum: "🎨",
+  park: "🌿", shopping: "🛍️", nightlife: "🎵", hotel: "🏨", beach: "🏖️", other: "📍",
 };
 
 const PasteLinkInput = () => {
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<ExtractedPlace | null>(null);
+  const [places, setPlaces] = useState<ExtractedPlace[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [showCaption, setShowCaption] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
 
   const handleExtract = async () => {
     if (!url.trim()) return;
     setLoading(true);
     setError(null);
-    setResult(null);
-    setShowCaption(false);
+    setPlaces([]);
+    setSaved(false);
 
     try {
-      const data = await extractLocation(url.trim());
-      setResult(data);
+      const results = await extractLocations(url.trim());
+      setPlaces(results);
     } catch (err: any) {
       setError(err.message || "Failed to extract location");
     } finally {
@@ -48,16 +47,41 @@ const PasteLinkInput = () => {
     if (e.key === "Enter") handleExtract();
   };
 
-  const reset = () => {
-    setUrl("");
-    setResult(null);
-    setError(null);
-    setShowCaption(false);
+  const handleSaveAll = async () => {
+    if (places.length === 0 || saving || saved) return;
+    setSaving(true);
+    try {
+      await savePlaces(
+        places.map((p) => ({
+          place_name: p.place_name,
+          category: p.category,
+          address: p.address,
+          latitude: p.latitude,
+          longitude: p.longitude,
+          description: p.description,
+          confidence: p.confidence,
+          source_url: url,
+          source_caption: p.source_caption,
+          source_username: p.source_username,
+          platform: p.platform,
+        }))
+      );
+      setSaved(true);
+      // Notify the map to refresh
+      window.dispatchEvent(new Event("kohay:places-updated"));
+    } catch (err: any) {
+      setError(err.message || "Failed to save places");
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const confidence = result?.confidence || "low";
-  const conf = confidenceConfig[confidence];
-  const ConfIcon = conf.icon;
+  const reset = () => {
+    setUrl("");
+    setPlaces([]);
+    setError(null);
+    setSaved(false);
+  };
 
   return (
     <section className="py-16 bg-background" id="paste-link">
@@ -76,11 +100,11 @@ const PasteLinkInput = () => {
             Paste a link, get the spot
           </h2>
           <p className="text-muted-foreground">
-            Drop a TikTok or Instagram reel link and we'll extract the location automatically.
+            Drop a TikTok or Instagram link and we'll extract every place mentioned — automatically saved to your map.
           </p>
         </motion.div>
 
-        {/* Input area */}
+        {/* Input */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           whileInView={{ opacity: 1, y: 0 }}
@@ -146,81 +170,116 @@ const PasteLinkInput = () => {
             </motion.div>
           )}
 
-          {result && (
+          {places.length > 0 && (
             <motion.div
-              key="result"
-              initial={{ opacity: 0, y: 10, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -10, scale: 0.98 }}
-              className="mt-6 p-5 rounded-2xl bg-card border border-border shadow-[var(--shadow-card)]"
+              key="results"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="mt-6 space-y-3"
             >
-              <div className="flex items-start justify-between gap-4">
-                <div className="space-y-2 flex-1">
-                  <div className="flex items-center gap-2">
-                    <div className="h-10 w-10 rounded-xl bg-accent/15 flex items-center justify-center">
-                      <MapPin className="h-5 w-5 text-accent" />
-                    </div>
-                    <div>
-                      <h3 className="font-bold text-foreground font-display text-lg">
-                        {result.name}
-                      </h3>
-                      <p className="text-sm text-muted-foreground">{result.address}</p>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <span className="px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-semibold">
-                      {result.category}
-                    </span>
-                    {/* Confidence badge */}
-                    <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold ${conf.className}`}>
-                      <ConfIcon className="h-3 w-3" />
-                      {conf.label}
-                    </span>
-                    {result.lat && result.lng && (
-                      <span className="px-3 py-1 rounded-full bg-muted text-muted-foreground text-xs font-medium">
-                        📍 {result.lat.toFixed(4)}, {result.lng.toFixed(4)}
-                      </span>
-                    )}
-                  </div>
-                  {result.description && (
-                    <p className="text-sm text-muted-foreground mt-2">{result.description}</p>
-                  )}
-                  {/* Source caption toggle */}
-                  {result.source_caption && (
-                    <div className="mt-2">
-                      <button
-                        onClick={() => setShowCaption(!showCaption)}
-                        className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                      >
-                        {showCaption ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                        {showCaption ? "Hide source text" : "Show source text"}
-                      </button>
-                      {showCaption && (
-                        <motion.div
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: "auto" }}
-                          className="mt-2 p-3 rounded-xl bg-muted/50 border border-border/50"
-                        >
-                          <p className="text-xs text-muted-foreground whitespace-pre-wrap leading-relaxed">
-                            {result.source_caption}
-                          </p>
-                        </motion.div>
-                      )}
-                    </div>
-                  )}
-                </div>
+              {/* Header */}
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">
+                  {places.length} place{places.length !== 1 ? "s" : ""} found
+                </p>
                 <button
                   onClick={reset}
-                  className="h-8 w-8 rounded-full bg-muted flex items-center justify-center hover:bg-muted-foreground/20 transition-colors shrink-0"
+                  className="h-7 w-7 rounded-full bg-muted flex items-center justify-center hover:bg-muted-foreground/20 transition-colors"
                 >
-                  <X className="h-4 w-4 text-muted-foreground" />
+                  <X className="h-3.5 w-3.5 text-muted-foreground" />
                 </button>
               </div>
-              <div className="mt-4 pt-4 border-t border-border">
-                <button className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:bg-primary/90 transition-colors">
-                  Save to My Map
-                </button>
-              </div>
+
+              {/* Place cards */}
+              {places.map((place, i) => {
+                const confidence = (place.confidence || "low") as "high" | "medium" | "low";
+                const conf = confidenceConfig[confidence];
+                const ConfIcon = conf.icon;
+                const emoji = categoryEmoji[place.category] || "📍";
+
+                return (
+                  <motion.div
+                    key={i}
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.06 }}
+                    className="p-4 rounded-2xl bg-card border border-border shadow-[var(--shadow-card)]"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="h-10 w-10 rounded-xl bg-accent/10 flex items-center justify-center text-xl shrink-0">
+                        {emoji}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-bold text-foreground font-display leading-tight">
+                          {place.place_name}
+                        </h3>
+                        {place.address && (
+                          <p className="text-sm text-muted-foreground mt-0.5 truncate">{place.address}</p>
+                        )}
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          <span className="px-2.5 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-semibold capitalize">
+                            {place.category}
+                          </span>
+                          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold ${conf.className}`}>
+                            <ConfIcon className="h-3 w-3" />
+                            {conf.label}
+                          </span>
+                          {place.latitude && place.longitude && (
+                            <span className="px-2.5 py-0.5 rounded-full bg-muted text-muted-foreground text-xs font-medium">
+                              {place.latitude.toFixed(3)}, {place.longitude.toFixed(3)}
+                            </span>
+                          )}
+                        </div>
+                        {place.description && (
+                          <p className="text-xs text-muted-foreground mt-2 leading-relaxed line-clamp-2">
+                            {place.description}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </motion.div>
+                );
+              })}
+
+              {/* Save all button */}
+              <motion.button
+                onClick={handleSaveAll}
+                disabled={saving || saved}
+                className={`w-full py-3 rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 ${
+                  saved
+                    ? "bg-accent/15 text-accent border-2 border-accent/30"
+                    : "bg-primary text-primary-foreground hover:bg-primary/90"
+                } disabled:opacity-70 disabled:cursor-not-allowed`}
+                whileTap={{ scale: 0.98 }}
+              >
+                {saving ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Saving to map…
+                  </>
+                ) : saved ? (
+                  <>
+                    <Check className="h-4 w-4" />
+                    Saved to your map!
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4" />
+                    Save {places.length > 1 ? `all ${places.length} places` : "to my map"}
+                  </>
+                )}
+              </motion.button>
+
+              {saved && (
+                <motion.p
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="text-center text-xs text-muted-foreground"
+                >
+                  Scroll down to see them on your map ↓
+                </motion.p>
+              )}
             </motion.div>
           )}
         </AnimatePresence>

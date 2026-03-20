@@ -350,11 +350,12 @@ Set confidence to "low" since you cannot see the actual post content.`;
   }
 
   const sharedRules = `Rules:
+- Extract EVERY distinct venue or place mentioned — if the post visits multiple spots, include ALL of them
 - Confidence hierarchy: explicit 📍 pin = high, venue name in caption = high, geographic hashtags only = medium, only city/country = medium, guessing = low
 - Prioritize explicit location mentions: 📍 pins, tagged locations, addresses, city/country names
 - If coordinates or addresses are visible, use those
 - Never fabricate coordinates — only provide lat/lng when you have high confidence in the specific venue
-- Extract the relevant caption text as source_caption`;
+- Extract the relevant caption text as source_caption for each place`;
 
   if (platform === "tiktok") {
     return `You are a location extraction assistant for a travel app called Kohay.
@@ -397,61 +398,74 @@ ${sharedRules}`;
 
 // ─── Few-Shot Examples ────────────────────────────────────────────────────────
 
-const EXTRACT_LOCATION_TOOL_DEF = {
+const PLACE_SCHEMA = {
+  type: "object",
+  properties: {
+    place_name: { type: "string", description: "Name of the place/venue" },
+    category: {
+      type: "string",
+      enum: ["gym", "food", "library", "museum", "cafe", "park", "shopping", "nightlife", "hotel", "beach", "other"],
+      description: "Category of the place",
+    },
+    address: { type: "string", description: "Full address or city/country" },
+    latitude: { type: "number", description: "Approximate latitude" },
+    longitude: { type: "number", description: "Approximate longitude" },
+    description: { type: "string", description: "Brief description of the place (1-2 sentences)" },
+    source_username: { type: "string", description: "Username from the social media post" },
+    platform: {
+      type: "string",
+      enum: ["tiktok", "instagram", "youtube", "other"],
+      description: "Social media platform",
+    },
+    confidence: {
+      type: "string",
+      enum: ["high", "medium", "low"],
+      description: "high = explicit location found, medium = inferred from context, low = guessing",
+    },
+    source_caption: {
+      type: "string",
+      description: "The relevant caption/text from the post mentioning the location",
+    },
+  },
+  required: ["place_name", "category", "address", "description", "platform", "confidence"],
+  additionalProperties: false,
+};
+
+const EXTRACT_LOCATIONS_TOOL_DEF = {
   type: "function",
   function: {
-    name: "extract_location",
-    description: "Extract structured location data from a social media post",
+    name: "extract_locations",
+    description: "Extract ALL locations/venues mentioned in the social media post. Return every place visited or mentioned — if the post visits multiple spots, include all of them.",
     parameters: {
       type: "object",
       properties: {
-        place_name: { type: "string", description: "Name of the place/venue" },
-        category: {
-          type: "string",
-          enum: ["gym", "food", "library", "museum", "cafe", "park", "shopping", "nightlife", "hotel", "beach", "other"],
-          description: "Category of the place",
-        },
-        address: { type: "string", description: "Full address or city/country" },
-        latitude: { type: "number", description: "Approximate latitude" },
-        longitude: { type: "number", description: "Approximate longitude" },
-        description: { type: "string", description: "Brief description of the place (1-2 sentences)" },
-        source_username: { type: "string", description: "Username from the social media post" },
-        platform: {
-          type: "string",
-          enum: ["tiktok", "instagram", "youtube", "other"],
-          description: "Social media platform",
-        },
-        confidence: {
-          type: "string",
-          enum: ["high", "medium", "low"],
-          description: "high = explicit location found, medium = inferred from context, low = guessing",
-        },
-        source_caption: {
-          type: "string",
-          description: "The relevant caption/text from the post mentioning the location",
+        places: {
+          type: "array",
+          description: "All distinct real-world venues/places mentioned. Include multiple if the post covers multiple spots.",
+          items: PLACE_SCHEMA,
         },
       },
-      required: ["place_name", "category", "address", "description", "platform", "confidence"],
+      required: ["places"],
       additionalProperties: false,
     },
   },
 };
 
 const fewShotExamples = [
-  // Example 1: TikTok with 📍 pin — high confidence
+  // Example 1: TikTok day-trip with multiple venues — returns all of them
   {
     role: "user",
-    content: `Extract location info from this social media post.
+    content: `Extract ALL locations from this social media post.
 
 URL: https://www.tiktok.com/@foodie/video/7123456789
 
 --- Extracted location signals ---
-Pin markers: Ichiran Ramen, Shibuya, Tokyo
+Pin markers: Ichiran Ramen, Shibuya; Shibuya Scramble Square
 Geographic hashtags: #ramen, #tokyo, #shibuya
 ---
 
 [RAW CAPTION]
-best ramen I've ever had 🍜✨ 📍 Ichiran Ramen, Shibuya Tokyo #ramen #tokyo #shibuya #japan #foodtok
+Tokyo day trip 🗼 started at 📍 Ichiran Ramen, Shibuya then grabbed coffee at 📍 Shibuya Scramble Square #ramen #tokyo #shibuya #japan #foodtok
 
 [AUTHOR]
 foodienyc (@foodie)`,
@@ -463,26 +477,42 @@ foodienyc (@foodie)`,
       id: "ex1",
       type: "function",
       function: {
-        name: "extract_location",
+        name: "extract_locations",
         arguments: JSON.stringify({
-          place_name: "Ichiran Ramen Shibuya",
-          category: "food",
-          address: "Shibuya, Tokyo, Japan",
-          latitude: 35.6598,
-          longitude: 139.7004,
-          description: "Famous solo-booth ramen chain, Shibuya branch. Known for tonkotsu broth.",
-          confidence: "high",
-          source_caption: "📍 Ichiran Ramen, Shibuya Tokyo",
-          platform: "tiktok",
-          source_username: "foodie",
+          places: [
+            {
+              place_name: "Ichiran Ramen Shibuya",
+              category: "food",
+              address: "Shibuya, Tokyo, Japan",
+              latitude: 35.6598,
+              longitude: 139.7004,
+              description: "Famous solo-booth ramen chain, Shibuya branch.",
+              confidence: "high",
+              source_caption: "📍 Ichiran Ramen, Shibuya",
+              platform: "tiktok",
+              source_username: "foodie",
+            },
+            {
+              place_name: "Shibuya Scramble Square",
+              category: "other",
+              address: "2 Chome-24-12 Shibuya, Tokyo, Japan",
+              latitude: 35.6581,
+              longitude: 139.7017,
+              description: "Major skyscraper complex above Shibuya Station.",
+              confidence: "high",
+              source_caption: "📍 Shibuya Scramble Square",
+              platform: "tiktok",
+              source_username: "foodie",
+            },
+          ],
         }),
       },
     }],
   },
-  // Example 2: TikTok with hashtags only — medium confidence
+  // Example 2: TikTok single cafe with hashtags only
   {
     role: "user",
-    content: `Extract location info from this social media post.
+    content: `Extract ALL locations from this social media post.
 
 URL: https://www.tiktok.com/@traveler/video/7987654321
 
@@ -504,55 +534,22 @@ traveler (@traveler)`,
       id: "ex2",
       type: "function",
       function: {
-        name: "extract_location",
+        name: "extract_locations",
         arguments: JSON.stringify({
-          place_name: "Café in Montmartre",
-          category: "cafe",
-          address: "Montmartre, Paris, France",
-          latitude: 48.8867,
-          longitude: 2.3431,
-          description: "A café in the Montmartre neighborhood of Paris, France.",
-          confidence: "medium",
-          source_caption: "#cafeparis #montmartre",
-          platform: "tiktok",
-          source_username: "traveler",
-        }),
-      },
-    }],
-  },
-  // Example 3: Instagram og:description — medium confidence
-  {
-    role: "user",
-    content: `Extract location info from this social media post.
-
-URL: https://www.instagram.com/p/ABC123/
-
-[SOURCE: og:description]
-Blue Bottle Coffee in Chelsea, NYC. The new pour-over menu is incredible... (via @bluebottle)
-
---- Extracted location signals ---
-Location labels: Blue Bottle Coffee in Chelsea, NYC
----`,
-  },
-  {
-    role: "assistant",
-    content: null,
-    tool_calls: [{
-      id: "ex3",
-      type: "function",
-      function: {
-        name: "extract_location",
-        arguments: JSON.stringify({
-          place_name: "Blue Bottle Coffee Chelsea",
-          category: "cafe",
-          address: "Chelsea, New York City, NY, USA",
-          latitude: 40.7425,
-          longitude: -74.0012,
-          description: "Blue Bottle Coffee location in Chelsea, Manhattan.",
-          confidence: "medium",
-          source_caption: "Blue Bottle Coffee in Chelsea, NYC",
-          platform: "instagram",
-          source_username: "bluebottle",
+          places: [
+            {
+              place_name: "Café in Montmartre",
+              category: "cafe",
+              address: "Montmartre, Paris, France",
+              latitude: 48.8867,
+              longitude: 2.3431,
+              description: "A café in the Montmartre neighborhood of Paris.",
+              confidence: "medium",
+              source_caption: "#cafeparis #montmartre",
+              platform: "tiktok",
+              source_username: "traveler",
+            },
+          ],
         }),
       },
     }],
@@ -564,7 +561,7 @@ Location labels: Blue Bottle Coffee in Chelsea, NYC
 async function callAI(
   apiKey: string,
   messages: object[],
-): Promise<{ locationData: Record<string, unknown> } | null> {
+): Promise<{ places: Record<string, unknown>[] } | null> {
   const response = await fetch(
     "https://ai.gateway.lovable.dev/v1/chat/completions",
     {
@@ -576,8 +573,8 @@ async function callAI(
       body: JSON.stringify({
         model: "google/gemini-3-flash-preview",
         messages,
-        tools: [EXTRACT_LOCATION_TOOL_DEF],
-        tool_choice: { type: "function", function: { name: "extract_location" } },
+        tools: [EXTRACT_LOCATIONS_TOOL_DEF],
+        tool_choice: { type: "function", function: { name: "extract_locations" } },
       }),
     }
   );
@@ -594,8 +591,9 @@ async function callAI(
   const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
   if (!toolCall) return null;
 
-  const locationData = JSON.parse(toolCall.function.arguments);
-  return { locationData };
+  const parsed = JSON.parse(toolCall.function.arguments);
+  const places: Record<string, unknown>[] = Array.isArray(parsed.places) ? parsed.places : [parsed];
+  return { places };
 }
 
 // ─── Main Handler ─────────────────────────────────────────────────────────────
@@ -632,8 +630,8 @@ serve(async (req) => {
     const systemPrompt = buildSystemPrompt(platform, hasContent, hasSignals);
 
     const userMessage = hasContent
-      ? `Extract location info from this social media post.\n\nURL: ${resolvedUrl}\n\n${scrapedContent!.slice(0, 8000)}`
-      : `Extract location info from this URL (no page content available): ${resolvedUrl}`;
+      ? `Extract ALL locations from this social media post. Include every venue or place mentioned, not just the primary one.\n\nURL: ${resolvedUrl}\n\n${scrapedContent!.slice(0, 8000)}`
+      : `Extract ALL locations from this URL (no page content available): ${resolvedUrl}`;
 
     const messages = [
       { role: "system", content: systemPrompt },
@@ -645,11 +643,12 @@ serve(async (req) => {
     const result = await callAI(LOVABLE_API_KEY, messages);
     if (!result) throw new Error("AI did not return structured location data");
 
-    let locationData = result.locationData;
+    let places = result.places;
 
-    // Step 4: Low-confidence retry when we have content
-    if (locationData.confidence === "low" && hasContent) {
-      console.log("Low confidence result, retrying with focused prompt...");
+    // Step 4: Low-confidence retry when we have content and all results are low
+    const allLowConfidence = places.every((p) => p.confidence === "low");
+    if (allLowConfidence && hasContent) {
+      console.log("All low confidence, retrying with focused prompt...");
       const retryMessages = [
         ...messages,
         {
@@ -659,14 +658,14 @@ serve(async (req) => {
             id: "retry_ctx",
             type: "function",
             function: {
-              name: "extract_location",
-              arguments: JSON.stringify(locationData),
+              name: "extract_locations",
+              arguments: JSON.stringify({ places }),
             },
           }],
         },
         {
           role: "user",
-          content: `The previous extraction had low confidence. Focus specifically on: 📍 symbols, any venue/business names, addresses, or recognizable place names in the content. Re-examine the content carefully:\n\n${scrapedContent!.slice(0, 8000)}`,
+          content: `The previous extraction had low confidence. Focus specifically on: 📍 symbols, any venue/business names, addresses, or recognizable place names. Re-examine carefully:\n\n${scrapedContent!.slice(0, 8000)}`,
         },
       ];
 
@@ -675,31 +674,33 @@ serve(async (req) => {
         return null;
       });
 
-      if (retryResult && retryResult.locationData.confidence !== "low") {
-        console.log("Retry improved confidence to:", retryResult.locationData.confidence);
-        locationData = retryResult.locationData;
+      if (retryResult && retryResult.places.some((p) => p.confidence !== "low")) {
+        console.log("Retry improved confidence");
+        places = retryResult.places;
       }
     }
 
     // Step 5: Ensure confidence is "low" when we had no content
-    if (!hasContent && locationData.confidence !== "low") {
-      locationData.confidence = "low";
+    if (!hasContent) {
+      places = places.map((p) => ({ ...p, confidence: "low" }));
     }
 
-    // Step 6: Backfill source_username from oEmbed if AI didn't set it
-    if (!locationData.source_username && authorUsername) {
-      locationData.source_username = authorUsername;
-    }
+    // Step 6: Backfill source_username and platform from oEmbed if AI didn't set them
+    places = places.map((p) => ({
+      ...p,
+      source_username: p.source_username || authorUsername || undefined,
+      platform: p.platform || platform,
+    }));
 
     console.log("Result:", JSON.stringify({
-      place: locationData.place_name,
-      confidence: locationData.confidence,
+      placeCount: places.length,
+      places: places.map((p) => ({ name: p.place_name, confidence: p.confidence })),
       hadContent: hasContent,
       platform,
       hadPreprocessedSignals: hasSignals,
     }));
 
-    return new Response(JSON.stringify({ success: true, data: locationData }), {
+    return new Response(JSON.stringify({ success: true, places }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e: unknown) {
